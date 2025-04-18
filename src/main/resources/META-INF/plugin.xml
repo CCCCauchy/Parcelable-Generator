@@ -1,0 +1,26 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <id>org.hz.cauchy.parcelablegenerator</id>
+    <name>Parcelable Generator</name>
+    <vendor>Cauchy</vendor>
+
+    <description><![CDATA[
+      为Java Bean生成Parcelable序列化方法的Android Studio插件。
+      使用方法：在Java Bean类文件中，右键点击代码区域，选择"Generate" -> "Generate Parcelable Methods"。
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>org.jetbrains.android</depends>
+
+    <resource-bundle>messages.MyBundle</resource-bundle>
+
+    <actions>
+        <action id="org.jetbrains.plugins.parcelablegenerator.GenerateParcelableAction"
+                class="org.hz.cauchy.plugin.actions.GenerateParcelableAction"
+                text="Generate Parcelable Methods"
+                description="Generate Parcelable implementation methods for a Java class">
+            <add-to-group group-id="GenerateGroup" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
