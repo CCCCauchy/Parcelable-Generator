@@ -18,7 +18,6 @@ import com.intellij.psi.util.PsiTypesUtil
  */
 class GenerateParcelableAction : AnAction() {
 
-    private val LOG = Logger.getInstance(GenerateParcelableAction::class.java)
 
     // 指定Action更新线程为后台线程
     override fun getActionUpdateThread(): ActionUpdateThread {
@@ -26,169 +25,137 @@ class GenerateParcelableAction : AnAction() {
     }
 
     override fun actionPerformed(e: AnActionEvent) {
-        LOG.info("GenerateParcelableAction被触发")
-        val project = e.project
-        if (project == null) {
-            LOG.warn("未找到项目，操作取消")
-            return
-        }
-
-        val editor = e.getData(CommonDataKeys.EDITOR)
-        if (editor == null) {
-            LOG.warn("未找到编辑器，操作取消")
-            return
-        }
-
-        val psiFile = e.getData(CommonDataKeys.PSI_FILE)
-        if (psiFile == null) {
-            LOG.warn("未找到PSI文件，操作取消")
-            return
-        }
-
+        val project = e.project ?: return
+        val editor = e.getData(CommonDataKeys.EDITOR) ?: return
+        val psiFile = e.getData(CommonDataKeys.PSI_FILE) ?: return
         if (psiFile !is PsiJavaFile) {
-            LOG.warn("文件不是Java文件，操作取消")
             return
         }
-
-        LOG.info("找到Java文件: ${psiFile.name}")
         val offset = editor.caretModel.offset
-        val element = psiFile.findElementAt(offset)
-        if (element == null) {
-            LOG.warn("光标位置没有找到元素，操作取消")
-            return
-        }
-
-        val psiClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)
-        if (psiClass == null) {
-            LOG.warn("未找到Java类，操作取消")
-            return
-        }
-
-        LOG.info("找到Java类: ${psiClass.name}")
+        val element = psiFile.findElementAt(offset) ?: return
+        val psiClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java) ?: return
 
         generateParcelableImplementation(project, psiClass, element)
-        LOG.info("成功为类 ${psiClass.name} 生成Parcelable实现")
     }
 
-    private fun findParcelableInterface(project: Project): PsiClass? {
-        LOG.info("查找Parcelable接口")
-        return PsiTypesUtil.getPsiClass(
-            PsiElementFactory.getInstance(project).createTypeByFQClassName(
-                "android.os.Parcelable",
-                GlobalSearchScope.allScope(project)
-            )
-        )
-    }
-
-    private fun generateParcelableImplementation(project: Project, psiClass: PsiClass, anchorElement: PsiElement) {
-        LOG.info("开始生成Parcelable实现")
+    private fun generateParcelableImplementation(
+        project: Project,
+        psiClass: PsiClass,
+        anchorElement: PsiElement
+    ) {
         WriteCommandAction.runWriteCommandAction(project) {
             val factory = PsiElementFactory.getInstance(project)
 
             // 获取所有非静态、非瞬态字段
             val fields = psiClass.fields.filter { field ->
-                !field.hasModifierProperty(PsiModifier.STATIC) && !field.hasModifierProperty(PsiModifier.TRANSIENT)
+                !field.hasModifierProperty(PsiModifier.STATIC) && !field.hasModifierProperty(
+                    PsiModifier.TRANSIENT
+                )
             }
-            LOG.info("找到 ${fields.size} 个需要处理的字段")
 
             // 删除已存在的序列化方法和字段
-            LOG.info("检查并删除已存在的序列化方法和字段")
-
             try {
                 // 查找所有可能的Parcel构造函数并删除
-                LOG.info("查找并删除现有的Parcel构造函数")
                 val parcelConstructors = psiClass.constructors.filter { constructor ->
                     constructor.parameterList.parametersCount == 0 ||
                             (constructor.parameterList.parametersCount == 1 &&
-                                    constructor.parameterList.parameters[0].type.presentableText.contains("Parcel"))
+                                    constructor.parameterList.parameters[0].type.presentableText.contains(
+                                        "Parcel"
+                                    ))
                 }
 
                 parcelConstructors.forEach {
-                    LOG.info("删除Parcel构造函数: ${it.text}")
                     it.delete()
                 }
 
                 // 查找并删除describeContents方法
-                LOG.info("查找并删除现有的describeContents方法")
                 val describeContentsMethods = psiClass.methods.filter {
                     it.name == "describeContents"
                 }
 
                 describeContentsMethods.forEach {
-                    LOG.info("删除describeContents方法: ${it.text}")
                     it.delete()
                 }
 
                 // 查找并删除writeToParcel方法
-                LOG.info("查找并删除现有的writeToParcel方法")
                 val writeToParcelMethods = psiClass.methods.filter {
                     it.name == "writeToParcel"
                 }
 
                 writeToParcelMethods.forEach {
-                    LOG.info("删除writeToParcel方法: ${it.text}")
                     it.delete()
                 }
 
                 // 查找并删除CREATOR字段
-                LOG.info("查找并删除现有的CREATOR字段")
                 val creatorFields = psiClass.fields.filter {
                     it.name == "CREATOR"
                 }
 
                 creatorFields.forEach {
-                    LOG.info("删除CREATOR字段: ${it.text}")
                     it.delete()
                 }
             } catch (e: Exception) {
-                LOG.error("删除现有序列化方法时出错", e)
+                e.printStackTrace()
             }
 
             // 准备所有需要添加的元素
             val elementsToAdd = mutableListOf<Pair<String, (String) -> PsiElement>>()
 
             // 准备默认无参构造方法
-            LOG.info("准备默认无参构造方法")
             val defaultConstructorText = "public ${psiClass.name}() {\n}"
-            elementsToAdd.add(Pair(defaultConstructorText) { text -> factory.createMethodFromText(text, psiClass) })
+            elementsToAdd.add(Pair(defaultConstructorText) { text ->
+                factory.createMethodFromText(
+                    text,
+                    psiClass
+                )
+            })
 
             // 准备describeContents方法
-            LOG.info("准备describeContents方法")
             val describeContentsText = """
                 @Override
                 public int describeContents() {
                     return 0;
                 }
             """.trimIndent()
-            elementsToAdd.add(Pair(describeContentsText) { text -> factory.createMethodFromText(text, psiClass) })
+            elementsToAdd.add(Pair(describeContentsText) { text ->
+                factory.createMethodFromText(
+                    text,
+                    psiClass
+                )
+            })
 
             // 准备writeToParcel方法
-            LOG.info("准备writeToParcel方法")
             val writeToParcelText = buildString {
                 append("@Override\n")
                 append("public void writeToParcel(android.os.Parcel dest, int flags) {\n")
                 for (field in fields) {
-                    LOG.info("为字段 ${field.name} (${field.type.canonicalText}) 生成写入代码")
                     append(getWriteParcelStatement(field))
                 }
                 append("}")
             }
-            elementsToAdd.add(Pair(writeToParcelText) { text -> factory.createMethodFromText(text, psiClass) })
+            elementsToAdd.add(Pair(writeToParcelText) { text ->
+                factory.createMethodFromText(
+                    text,
+                    psiClass
+                )
+            })
 
             // 准备Parcel构造函数
-            LOG.info("准备Parcel构造函数")
             val constructorText = buildString {
                 append("protected ${psiClass.name}(android.os.Parcel in) {\n")
                 for (field in fields) {
-                    LOG.info("为字段 ${field.name} (${field.type.canonicalText}) 生成读取代码")
                     append(getReadParcelStatement(field))
                 }
                 append("}")
             }
-            elementsToAdd.add(Pair(constructorText) { text -> factory.createMethodFromText(text, psiClass) })
+            elementsToAdd.add(Pair(constructorText) { text ->
+                factory.createMethodFromText(
+                    text,
+                    psiClass
+                )
+            })
 
             // 准备CREATOR字段 - 添加到最后
-            LOG.info("准备CREATOR字段")
             val creatorText = """
                 public static final android.os.Parcelable.Creator<${psiClass.name}> CREATOR = new android.os.Parcelable.Creator<${psiClass.name}>() {
                     @Override
@@ -202,12 +169,14 @@ class GenerateParcelableAction : AnAction() {
                     }
                 };
             """.trimIndent()
-            elementsToAdd.add(Pair(creatorText) { text -> factory.createFieldFromText(text, psiClass) })
+            elementsToAdd.add(Pair(creatorText) { text ->
+                factory.createFieldFromText(
+                    text,
+                    psiClass
+                )
+            })
 
             // 找到合适的锚点元素（确保锚点在类内部）
-            LOG.info("确定插入位置")
-
-
             // 添加所有元素
             elementsToAdd.forEach { (text, creator) ->
                 val newElement = creator(text)
@@ -215,14 +184,12 @@ class GenerateParcelableAction : AnAction() {
                 psiClass.addBefore(newElement, psiClass.rBrace)
             }
 
-            LOG.info("Parcelable实现生成完成")
         }
     }
 
     private fun getReadParcelStatement(field: PsiField): String {
         val name = field.name
         val type = field.type.canonicalText
-        LOG.info("为字段 $name 处理Parcel读取, 类型: $type")
 
         return when {
             type == "int" -> "this.$name = in.readInt();\n"
@@ -235,22 +202,18 @@ class GenerateParcelableAction : AnAction() {
             type == "short" -> "this.$name = (short) in.readInt();\n"
             type == "java.lang.String" -> "this.$name = in.readString();\n"
             type.startsWith("java.util.List") || type.startsWith("java.util.ArrayList") -> {
-                LOG.info("处理集合类型: $type")
                 "this.$name = in.readArrayList(getClass().getClassLoader());\n"
             }
 
             type.endsWith("[]") -> {
-                LOG.info("处理数组类型: $type")
                 "in.readTypedArray(this.$name, ${getArrayCreatorExpression(type)});\n"
             }
 
             isParcelable(type) -> {
-                LOG.info("处理Parcelable类型: $type")
                 "this.$name = in.readParcelable(getClass().getClassLoader());\n"
             }
 
             else -> {
-                LOG.warn("无法确定如何读取类型为 $type 的字段 $name")
                 "// Could not determine how to read $name of type $type\n"
             }
         }
@@ -259,7 +222,6 @@ class GenerateParcelableAction : AnAction() {
     private fun getWriteParcelStatement(field: PsiField): String {
         val name = field.name
         val type = field.type.canonicalText
-        LOG.info("为字段 $name 处理Parcel写入, 类型: $type")
 
         return when {
             type == "int" -> "dest.writeInt(this.$name);\n"
@@ -272,22 +234,18 @@ class GenerateParcelableAction : AnAction() {
             type == "short" -> "dest.writeInt((int) this.$name);\n"
             type == "java.lang.String" -> "dest.writeString(this.$name);\n"
             type.startsWith("java.util.List") || type.startsWith("java.util.ArrayList") -> {
-                LOG.info("处理集合类型: $type")
                 "dest.writeList(this.$name);\n"
             }
 
             type.endsWith("[]") -> {
-                LOG.info("处理数组类型: $type")
                 "dest.writeTypedArray(this.$name, flags);\n"
             }
 
             isParcelable(type) -> {
-                LOG.info("处理Parcelable类型: $type")
                 "dest.writeParcelable(this.$name, flags);\n"
             }
 
             else -> {
-                LOG.warn("无法确定如何写入类型为 $type 的字段 $name")
                 "// Could not determine how to write $name of type $type\n"
             }
         }
@@ -295,7 +253,6 @@ class GenerateParcelableAction : AnAction() {
 
     private fun getArrayCreatorExpression(type: String): String {
         val baseType = type.substring(0, type.length - 2)
-        LOG.info("生成数组CREATOR表达式: $baseType.CREATOR")
         return "$baseType.CREATOR"
     }
 
@@ -307,7 +264,6 @@ class GenerateParcelableAction : AnAction() {
                 !type.equals("byte") && !type.equals("char") &&
                 !type.equals("long") && !type.equals("float") &&
                 !type.equals("double") && !type.equals("short")
-        LOG.info("检查类型 $type 是否为Parcelable: $result")
         return result
     }
 
@@ -325,6 +281,5 @@ class GenerateParcelableAction : AnAction() {
         }
 
         e.presentation.isEnabledAndVisible = available
-        LOG.info("操作可用性更新: $available")
     }
 } 
