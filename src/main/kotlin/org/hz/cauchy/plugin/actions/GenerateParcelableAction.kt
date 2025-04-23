@@ -1,5 +1,6 @@
 package org.hz.cauchy.plugin.actions
 
+import com.intellij.lang.jvm.types.JvmPrimitiveTypeKind
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -200,7 +201,8 @@ class GenerateParcelableAction : AnAction() {
 
     private fun getReadParcelStatement(field: PsiField): String {
         val name = field.name
-        val type = field.type.canonicalText
+        val type = field.type
+        val typeName = field.type.canonicalText
 
         val elementType = PsiUtil.extractIterableTypeParameter(field.type, false)
         if (elementType != null) {
@@ -214,26 +216,33 @@ class GenerateParcelableAction : AnAction() {
         }
 
         return when {
-            type == "int" -> "this.$name = in.readInt();\n"
-            type == "boolean" -> "this.$name = in.readByte() != 0;\n"
-            type == "byte" -> "this.$name = in.readByte();\n"
-            type == "char" -> "this.$name = (char) in.readInt();\n"
-            type == "long" -> "this.$name = in.readLong();\n"
-            type == "float" -> "this.$name = in.readFloat();\n"
-            type == "double" -> "this.$name = in.readDouble();\n"
-            type == "short" -> "this.$name = (short) in.readInt();\n"
-            type == "java.lang.String" -> "this.$name = in.readString();\n"
+            typeName == "int" -> "this.$name = in.readInt();\n"
+            typeName == "boolean" -> "this.$name = in.readByte() != 0;\n"
+            typeName == "byte" -> "this.$name = in.readByte();\n"
+            typeName == "char" -> "this.$name = (char) in.readInt();\n"
+            typeName == "long" -> "this.$name = in.readLong();\n"
+            typeName == "float" -> "this.$name = in.readFloat();\n"
+            typeName == "double" -> "this.$name = in.readDouble();\n"
+            typeName == "short" -> "this.$name = (short) in.readInt();\n"
+            typeName == "java.lang.String" -> "this.$name = in.readString();\n"
 
-            type.endsWith("[]") -> {
-                "in.readTypedArray(this.$name, ${getArrayCreatorExpression(type)});\n"
+
+            // 添加Map支持
+            typeName.startsWith("java.util.Map") || typeName.startsWith("java.util.HashMap") -> {
+                "this.$name = new HashMap<>();\n" +
+                        "in.readMap(this.$name, ${(type as? PsiClassType)?.parameters?.get(1)?.presentableText ?: "Object"}.class.getClassLoader());\n"
+            }
+
+            typeName.endsWith("[]") -> {
+                "in.readTypedArray(this.$name, ${getArrayCreatorExpression(typeName)});\n"
             }
 
             isImplementParcelable(field.type) -> {
-                "this.$name = in.readParcelable($type.class.getClassLoader());\n"
+                "this.$name = in.readParcelable($typeName.class.getClassLoader());\n"
             }
 
             else -> {
-                "//TODO Could not determine how to read $name of type $type\n"
+                "/*** TODO Could not determine how to read {@link $name} of type [$typeName] */\n"
             }
         }
     }
@@ -261,6 +270,11 @@ class GenerateParcelableAction : AnAction() {
             typeName == "short" -> "dest.writeInt((int) this.$name);\n"
             typeName == "java.lang.String" -> "dest.writeString(this.$name);\n"
 
+            // 添加Map支持
+            typeName.startsWith("java.util.Map") || typeName.startsWith("java.util.HashMap") -> {
+                "dest.writeMap(this.$name);\n"
+            }
+
             typeName.endsWith("[]") -> {
                 "dest.writeTypedArray(this.$name, flags);\n"
             }
@@ -270,7 +284,7 @@ class GenerateParcelableAction : AnAction() {
             }
 
             else -> {
-                "//TODO Could not determine how to write $name of type $typeName\n"
+                "/*** TODO Could not determine how to write {@link $name} of type [$typeName] */\n"
             }
         }
     }
@@ -318,4 +332,4 @@ class GenerateParcelableAction : AnAction() {
 
         e.presentation.isEnabledAndVisible = available
     }
-} 
+}

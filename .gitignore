@@ -4,3 +4,4 @@
 *.idea
 .intellijPlatform/
 /bin
+/.kotlin/
