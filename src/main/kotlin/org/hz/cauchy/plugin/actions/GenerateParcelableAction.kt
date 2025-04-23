@@ -6,10 +6,10 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
-import com.intellij.platform.ide.progress.ModalTaskOwner.project
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.util.PsiUtil
 
 
 /**
@@ -170,8 +170,8 @@ class GenerateParcelableAction : AnAction() {
             val creatorText = """
                 public static final android.os.Parcelable.Creator<${psiClass.name}> CREATOR = new android.os.Parcelable.Creator<${psiClass.name}>() {
                     @Override
-                    public ${psiClass.name} createFromParcel(android.os.Parcel in) {
-                        return new ${psiClass.name}(in);
+                    public ${psiClass.name} createFromParcel(android.os.Parcel source) {
+                        return new ${psiClass.name}(source);
                     }
 
                     @Override
@@ -202,6 +202,17 @@ class GenerateParcelableAction : AnAction() {
         val name = field.name
         val type = field.type.canonicalText
 
+        val elementType = PsiUtil.extractIterableTypeParameter(field.type, false)
+        if (elementType != null) {
+            val elementTypeName = elementType.presentableText
+            return when {
+                elementTypeName == "String" -> "this.$name = in.createStringArrayList();\n"
+                isImplementParcelable(elementType) -> "this.$name = in.createTypedArrayList(${elementTypeName}.CREATOR);\n"
+                else -> "this.$name = new ArrayList<>();\n" +
+                        "in.readList(this.$name, $elementTypeName.class.getClassLoader());\n"
+            }
+        }
+
         return when {
             type == "int" -> "this.$name = in.readInt();\n"
             type == "boolean" -> "this.$name = in.readByte() != 0;\n"
@@ -212,52 +223,54 @@ class GenerateParcelableAction : AnAction() {
             type == "double" -> "this.$name = in.readDouble();\n"
             type == "short" -> "this.$name = (short) in.readInt();\n"
             type == "java.lang.String" -> "this.$name = in.readString();\n"
-            type.startsWith("java.util.List") || type.startsWith("java.util.ArrayList") -> {
-                "this.$name = in.readArrayList(getClass().getClassLoader());\n"
-            }
 
             type.endsWith("[]") -> {
                 "in.readTypedArray(this.$name, ${getArrayCreatorExpression(type)});\n"
             }
 
-            isParcelable(type) -> {
-                "this.$name = in.readParcelable(getClass().getClassLoader());\n"
+            isImplementParcelable(field.type) -> {
+                "this.$name = in.readParcelable($type.class.getClassLoader());\n"
             }
 
             else -> {
-                "// Could not determine how to read $name of type $type\n"
+                "//TODO Could not determine how to read $name of type $type\n"
             }
         }
     }
 
     private fun getWriteParcelStatement(field: PsiField): String {
         val name = field.name
-        val type = field.type.canonicalText
+        val typeName = field.type.canonicalText
+
+        val elementType = PsiUtil.extractIterableTypeParameter(field.type, false)
+        if (elementType != null) {
+            return if (elementType.canonicalText == "java.lang.String")
+                "dest.writeStringList(this.$name);\n"
+            else if (isImplementParcelable(elementType)) "dest.writeTypedList(this.$name);\n"
+            else "dest.writeList(this.$name);\n"
+        }
 
         return when {
-            type == "int" -> "dest.writeInt(this.$name);\n"
-            type == "boolean" -> "dest.writeByte(this.$name ? (byte) 1 : (byte) 0);\n"
-            type == "byte" -> "dest.writeByte(this.$name);\n"
-            type == "char" -> "dest.writeInt((int) this.$name);\n"
-            type == "long" -> "dest.writeLong(this.$name);\n"
-            type == "float" -> "dest.writeFloat(this.$name);\n"
-            type == "double" -> "dest.writeDouble(this.$name);\n"
-            type == "short" -> "dest.writeInt((int) this.$name);\n"
-            type == "java.lang.String" -> "dest.writeString(this.$name);\n"
-            type.startsWith("java.util.List") || type.startsWith("java.util.ArrayList") -> {
-                "dest.writeList(this.$name);\n"
-            }
+            typeName == "int" -> "dest.writeInt(this.$name);\n"
+            typeName == "boolean" -> "dest.writeByte(this.$name ? (byte) 1 : (byte) 0);\n"
+            typeName == "byte" -> "dest.writeByte(this.$name);\n"
+            typeName == "char" -> "dest.writeInt((int) this.$name);\n"
+            typeName == "long" -> "dest.writeLong(this.$name);\n"
+            typeName == "float" -> "dest.writeFloat(this.$name);\n"
+            typeName == "double" -> "dest.writeDouble(this.$name);\n"
+            typeName == "short" -> "dest.writeInt((int) this.$name);\n"
+            typeName == "java.lang.String" -> "dest.writeString(this.$name);\n"
 
-            type.endsWith("[]") -> {
+            typeName.endsWith("[]") -> {
                 "dest.writeTypedArray(this.$name, flags);\n"
             }
 
-            isParcelable(type) -> {
+            isImplementParcelable(field.type) -> {
                 "dest.writeParcelable(this.$name, flags);\n"
             }
 
             else -> {
-                "// Could not determine how to write $name of type $type\n"
+                "//TODO Could not determine how to write $name of type $typeName\n"
             }
         }
     }
@@ -267,23 +280,25 @@ class GenerateParcelableAction : AnAction() {
         return "$baseType.CREATOR"
     }
 
-    private fun isParcelable(type: String): Boolean {
-        // 简单判断是否实现了Parcelable接口
-        // 在实际应用中，应该检查类是否真正实现了Parcelable接口
-        val result = !type.startsWith("java.") && !type.startsWith("javax.") &&
-                !type.equals("int") && !type.equals("boolean") &&
-                !type.equals("byte") && !type.equals("char") &&
-                !type.equals("long") && !type.equals("float") &&
-                !type.equals("double") && !type.equals("short")
-        return result
+    /**
+     * 检查类是否实现了Parcelable接口
+     */
+    private fun isImplementParcelable(elementType: PsiType): Boolean {
+        if (elementType is PsiClassType) {
+            val psiClass = elementType.resolve() ?: return false
+            return isImplementParcelable(psiClass)
+        }
+
+        return false
     }
 
     /**
      * 检查类是否实现了Parcelable接口
      */
-    private fun isImplementParcelable(project: Project, psiClass: PsiClass): Boolean {
-        val parcelableClass: PsiClass = JavaPsiFacade.getInstance(project)
-            .findClass("android.os.Parcelable", GlobalSearchScope.allScope(project)) ?: return false
+    private fun isImplementParcelable(psiClass: PsiClass): Boolean {
+        val parcelableClass: PsiClass = JavaPsiFacade.getInstance(psiClass.project)
+            .findClass("android.os.Parcelable", GlobalSearchScope.allScope(psiClass.project))
+            ?: return false
 
         return psiClass.isInheritor(parcelableClass, true)
     }
