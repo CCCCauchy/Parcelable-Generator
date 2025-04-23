@@ -1,17 +1,16 @@
 package org.hz.cauchy.plugin.actions
 
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.command.WriteCommandAction
-import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
+import com.intellij.platform.ide.progress.ModalTaskOwner.project
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.psi.util.PsiTypesUtil
+
 
 /**
  * 为Java Bean类生成Parcelable接口实现的Action
@@ -35,14 +34,10 @@ class GenerateParcelableAction : AnAction() {
         val element = psiFile.findElementAt(offset) ?: return
         val psiClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java) ?: return
 
-        generateParcelableImplementation(project, psiClass, element)
+        generateParcelableImplementation(project, psiClass)
     }
 
-    private fun generateParcelableImplementation(
-        project: Project,
-        psiClass: PsiClass,
-        anchorElement: PsiElement
-    ) {
+    private fun generateParcelableImplementation(project: Project, psiClass: PsiClass) {
         WriteCommandAction.runWriteCommandAction(project) {
             val factory = PsiElementFactory.getInstance(project)
 
@@ -128,6 +123,11 @@ class GenerateParcelableAction : AnAction() {
             val writeToParcelText = buildString {
                 append("@Override\n")
                 append("public void writeToParcel(android.os.Parcel dest, int flags) {\n")
+                // 检查是否是第一个字段，则添加super调用
+                if (psiClass.superClass?.methods?.any { it.name == "writeToParcel" } == true) {
+                    append("super.writeToParcel(dest, flags);\n")
+                }
+
                 for (field in fields) {
                     append(getWriteParcelStatement(field))
                 }
@@ -143,6 +143,17 @@ class GenerateParcelableAction : AnAction() {
             // 准备Parcel构造函数
             val constructorText = buildString {
                 append("protected ${psiClass.name}(android.os.Parcel in) {\n")
+
+                // 检查是否是第一个字段，如果是且父类实现了Parcelable，则添加super调用
+                if (psiClass.superClass?.constructors?.any { constructor ->
+                        constructor.parameterList.parametersCount == 1 &&
+                                constructor.parameterList.parameters[0].type.presentableText.contains(
+                                    "Parcel"
+                                )
+                    } == true) {
+                    append("super(in);\n")
+                }
+
                 for (field in fields) {
                     append(getReadParcelStatement(field))
                 }
@@ -265,6 +276,16 @@ class GenerateParcelableAction : AnAction() {
                 !type.equals("long") && !type.equals("float") &&
                 !type.equals("double") && !type.equals("short")
         return result
+    }
+
+    /**
+     * 检查类是否实现了Parcelable接口
+     */
+    private fun isImplementParcelable(project: Project, psiClass: PsiClass): Boolean {
+        val parcelableClass: PsiClass = JavaPsiFacade.getInstance(project)
+            .findClass("android.os.Parcelable", GlobalSearchScope.allScope(project)) ?: return false
+
+        return psiClass.isInheritor(parcelableClass, true)
     }
 
     override fun update(e: AnActionEvent) {
