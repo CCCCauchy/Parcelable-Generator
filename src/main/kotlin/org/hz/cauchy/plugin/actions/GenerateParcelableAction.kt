@@ -1,6 +1,5 @@
 package org.hz.cauchy.plugin.actions
 
-import com.intellij.lang.jvm.types.JvmPrimitiveTypeKind
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -225,7 +224,7 @@ class GenerateParcelableAction : AnAction() {
             typeName == "double" -> "this.$name = in.readDouble();\n"
             typeName == "short" -> "this.$name = (short) in.readInt();\n"
             typeName == "java.lang.String" -> "this.$name = in.readString();\n"
-
+            isImplementCharSequence(field.type) -> "this.$name = ($typeName) TextUtils.CHAR_SEQUENCE_CREATOR.createFromParcel(in);\n"
 
             // 添加Map支持
             typeName.startsWith("java.util.Map") || typeName.startsWith("java.util.HashMap") -> {
@@ -269,6 +268,8 @@ class GenerateParcelableAction : AnAction() {
             typeName == "double" -> "dest.writeDouble(this.$name);\n"
             typeName == "short" -> "dest.writeInt((int) this.$name);\n"
             typeName == "java.lang.String" -> "dest.writeString(this.$name);\n"
+            isImplementCharSequence(field.type) -> "TextUtils.writeToParcel(this.$name, dest, 0);\n"
+
 
             // 添加Map支持
             typeName.startsWith("java.util.Map") || typeName.startsWith("java.util.HashMap") -> {
@@ -315,6 +316,22 @@ class GenerateParcelableAction : AnAction() {
             ?: return false
 
         return psiClass.isInheritor(parcelableClass, true)
+    }
+
+    /**
+     * 检查类是否实现了CharSequence接口
+     */
+    private fun isImplementCharSequence(elementType: PsiType): Boolean {
+        if (elementType is PsiClassType) {
+            val psiClass = elementType.resolve() ?: return false
+            val charSequenceClass: PsiClass = JavaPsiFacade.getInstance(psiClass.project)
+                .findClass("java.lang.CharSequence", GlobalSearchScope.allScope(psiClass.project))
+                ?: return false
+
+            return psiClass.isInheritor(charSequenceClass, true)
+        }
+
+        return false
     }
 
     override fun update(e: AnActionEvent) {
