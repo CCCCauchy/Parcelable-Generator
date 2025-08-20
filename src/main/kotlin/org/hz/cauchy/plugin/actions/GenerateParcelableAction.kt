@@ -241,7 +241,7 @@ class GenerateParcelableAction : AnAction() {
             }
 
             else -> {
-                "/*** TODO Could not determine how to read {@link $name} of type [$typeName] */\n"
+                "this.$name = ($typeName) in.readValue($typeName.class.getClassLoader());"
             }
         }
     }
@@ -285,7 +285,7 @@ class GenerateParcelableAction : AnAction() {
             }
 
             else -> {
-                "/*** TODO Could not determine how to write {@link $name} of type [$typeName] */\n"
+                "dest.writeValue(this.$name);"
             }
         }
     }

@@ -1,6 +1,12 @@
 
 # IntelliJ Platform Plugin Template Changelog
 
+## [1.0.2] - 2025-08-20
+
+### Added
+
+- Support normal object default implements 
+
 ## [1.0.1] - 2025-04-23
 
 ### Added
